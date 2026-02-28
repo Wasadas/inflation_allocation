@@ -152,6 +152,9 @@ def get_inflation_surprise(
     """
     Computes CPI Surprise = Actual YoY - Expected YoY.
 
+    Reserved for future use (e.g. surprise-based regime or overlays).
+    Not used by the current backtest pipeline.
+
     For UK, a clean consensus series is not freely available at monthly
     frequency. We approximate using:
       - 'cleveland_fed_approx': 3-month lagged CPI as naive forecast

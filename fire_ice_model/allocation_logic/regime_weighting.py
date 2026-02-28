@@ -26,13 +26,12 @@ Risk Parity (optional, config: risk_parity.enabled):
     contributes equally to portfolio volatility.
 
 CTA mode (config: trend_following.cta_mode):
-    "etf"       → use assets.trend.cta_proxy ticker (e.g. DBMG.L; no Bloomberg data → synthetic)
+    "etf"       → use assets.trend.cta_proxy ticker (WTMA.L)
     "synthetic" → CTA weight is allocated to the synthetic trend signal
                   built in trend_following/momentum_signals.py
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -45,45 +44,33 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 # Config loading
 # ------------------------------------------------------------------
-# Default: project package config at fire_ice_model/config.yaml
-# Override (optional): export FIRE_ICE_CONFIG=/path/to/config.yaml
+# Reads package config from fire_ice_model/config.yaml
 CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
-ENV_PATH = Path(os.environ["FIRE_ICE_CONFIG"]).expanduser() if os.environ.get("FIRE_ICE_CONFIG") else None
-CONFIG_PATH = (ENV_PATH if ENV_PATH is not None else CONFIG_PATH).resolve()
-
-if not CONFIG_PATH.exists():
-    raise FileNotFoundError(
-        f"Config file not found at {CONFIG_PATH}. "
-        "Set FIRE_ICE_CONFIG to override, or ensure fire_ice_model/config.yaml exists."
-    )
 
 with open(CONFIG_PATH, "r") as f:
     CONFIG = yaml.safe_load(f) or {}
 
-# Helpful breadcrumb for debugging
-CONFIG["_config_path"] = str(CONFIG_PATH)
+ALLOC_CFG  = CONFIG.get("allocation", {})
+RP_CFG     = CONFIG.get("risk_parity", {})
+REGIME_CFG = CONFIG.get("regime", {})
+TF_CFG     = CONFIG.get("trend_following", {})
 
-required_top_keys = ["allocation", "risk_parity", "regime", "trend_following", "backtest"]
-missing = [k for k in required_top_keys if k not in CONFIG]
-if missing:
-    raise KeyError(
-        "Config is missing required top-level keys: "
-        f"{missing}. Loaded from: {CONFIG_PATH}. "
-        f"Top-level keys present: {list(CONFIG.keys())}. "
-        "(It looks like you may have overwritten config.yaml with a minimal file.)"
+if not ALLOC_CFG:
+    logger.warning(
+        "No 'allocation' block found in %s. Regime weighting will fail until it is added.",
+        CONFIG_PATH,
     )
 
-ALLOC_CFG  = CONFIG["allocation"]
-RP_CFG     = CONFIG["risk_parity"]
-REGIME_CFG = CONFIG["regime"]
-TF_CFG     = CONFIG["trend_following"]
 
+# ------------------------------------------------------------------
+# Allocation key → ticker mapping (config uses logical names; returns use tickers)
+# ------------------------------------------------------------------
 
-def _allocation_key_to_ticker_map() -> dict[str, str]:
+def _allocation_key_to_ticker_map() -> dict:
     """
-    Build a mapping from allocation config keys to ticker symbols.
-    Walks config["assets"] (logical_name -> ticker). Keys not in the map
-    are assumed to be tickers already (e.g. allocation written with ISF.L).
+    Build mapping from allocation config keys (logical names) to ticker symbols.
+    Walks config["assets"] (equities, bonds, real_assets, trend). Keys not in
+    the map are treated as tickers (e.g. allocation written with ISF.L).
     """
     out = {}
     assets = CONFIG.get("assets") or {}
@@ -97,12 +84,12 @@ def _allocation_key_to_ticker_map() -> dict[str, str]:
 
 def _to_ticker_weights(raw_weights: dict) -> pd.Series:
     """
-    Convert allocation weights (keys may be logical names or tickers) to a
+    Convert allocation weights (keys = logical names or tickers) to a
     Series indexed by ticker. If two allocation keys map to the same ticker,
     their weights are summed.
     """
     mapping = _allocation_key_to_ticker_map()
-    by_ticker: dict[str, float] = {}
+    by_ticker = {}
     for key, weight in raw_weights.items():
         if not isinstance(weight, (int, float)):
             continue
@@ -114,7 +101,7 @@ def _to_ticker_weights(raw_weights: dict) -> pd.Series:
 def _align_weights_to_returns(weights: pd.Series, returns: pd.DataFrame) -> pd.Series:
     """
     Restrict weights to assets that exist in returns and renormalize.
-    Handles missing data (e.g. WTMA.L delisted) so backtest never sees NaN.
+    Handles missing data (e.g. delisted ticker) so backtest never sees NaN.
     """
     if returns is None or returns.columns is None:
         return weights
@@ -167,10 +154,10 @@ def get_target_weights(
     else:
         weights = base_weights
 
-    # Align to return columns so we only have weights for assets with data (avoids NaN in backtest)
+    weights = weights / weights.sum()
+    # Align to return columns so only assets with data get weight (avoids NaN in backtest)
     if returns is not None:
         weights = _align_weights_to_returns(weights, returns)
-    weights = weights / weights.sum()
     return weights.round(4)
 
 
@@ -185,18 +172,6 @@ def build_weight_history(
     Automatically uses probability blending if classifier produced
     prob_fire / prob_boom / prob_ice / prob_recovery columns.
 
-    Risk-parity lookback (config risk_parity.lookback_months / lookback_vol_days):
-        Covariance is estimated from the last rp_months months of returns. With only
-        12 months the matrix is thin and weights can be noisy; results are more stable
-        with longer history (e.g. 24+ months). Set lookback_months: 24 in config to
-        use 24 months when available, or use higher covariance_shrinkage (or
-        shrinkage_when_thin) when history is short.
-
-    FIRE bypass: When the dominant regime is FIRE (High + Rising inflation), we skip
-        risk-parity optimization and use the raw base (or probability-blended) weights.
-        Equal-risk reweighting would otherwise dilute the intended tilt toward
-        commodities and CTA, which are the assets that historically perform in FIRE.
-
     Parameters
     ----------
     classified_df : Output of RegimeClassifier.classify()
@@ -207,26 +182,18 @@ def build_weight_history(
     Tuple of (DataFrame of weights indexed by date, stats dict with
     n_rebalance_dates, n_risk_parity_requested, n_risk_parity_skipped).
     """
-    # Prefer explicit lookback_months for stability; else derive from days (min 12 months)
-    rp_months_cfg = RP_CFG.get("lookback_months")
-    if rp_months_cfg is not None and rp_months_cfg > 0:
-        rp_months = int(rp_months_cfg)
-    else:
-        rp_months = max(RP_CFG.get("lookback_vol_days", 60) // 21, 12)
+    rp_months     = max(RP_CFG.get("lookback_vol_days", 60) // 21, 12)
     has_probs     = "prob_fire" in classified_df.columns
     use_prob      = REGIME_CFG.get("use_regime_probability", False) and has_probs
 
     weight_rows = []
-    n_rebalance_dates = 0
     n_risk_parity_requested = 0
-    n_risk_parity_skipped = 0
+    n_risk_parity_skipped   = 0
 
     for date, row in classified_df.iterrows():
         regime = row.get("dominant_regime") or row.get("regime")
         if pd.isna(regime):
             continue
-
-        n_rebalance_dates += 1
 
         # Regime probabilities (if available and enabled)
         probs = None
@@ -241,52 +208,27 @@ def build_weight_history(
         # Historical returns for covariance (no look-ahead)
         hist = returns.loc[:date].tail(rp_months)
 
-        # In FIRE we use raw base (or blended) weights and skip risk parity so the intended
-        # tilt to commodities and CTA is not diluted by equal-risk reweighting (Neville: these
-        # are the assets that perform when inflation is high and rising).
-        regime_str = str(regime).upper() if regime is not None else ""
-        skip_rp_for_fire = regime_str == "FIRE"
+        base_weights = _blend_weights(probs) if use_prob and probs else _get_hard_weights(str(regime))
+        active = [a for a in base_weights.index if base_weights[a] > 0 and a in hist.columns]
 
-        if use_risk_parity and len(hist) >= 12 and not skip_rp_for_fire:
+        if use_risk_parity and len(hist) >= 12 and len(active) >= 2:
             n_risk_parity_requested += 1
-            base_weights = _blend_weights(probs) if use_prob and probs else _get_hard_weights(str(regime))
-            active = [
-                a for a in base_weights.index
-                if base_weights[a] > 0 and a in hist.columns
-            ]
-            if len(active) < 2:
-                n_risk_parity_skipped += 1
             w = get_target_weights(str(regime), hist, use_risk_parity=True, regime_probs=probs)
         else:
+            if use_risk_parity and len(hist) >= 12 and len(active) < 2:
+                n_risk_parity_skipped += 1
             w = get_target_weights(str(regime), use_risk_parity=False, regime_probs=probs)
 
-        # Ensure weight columns match return columns (handles missing tickers e.g. WTMA.L)
         w = _align_weights_to_returns(w, returns)
-        total = w.sum()
-        if total <= 0:
-            # No overlap (e.g. config mismatch): fallback to equal weight so backtest gets valid weights
-            w = pd.Series(1.0 / len(returns.columns), index=returns.columns)
-        else:
-            w = w / total
         weight_rows.append({"date": date, **w.to_dict()})
 
     df = pd.DataFrame(weight_rows).set_index("date")
-    # Restrict to return columns so backtest always has matching weight and return columns
-    df = df.reindex(columns=returns.columns).fillna(0)
-    # Renormalize each row so weights sum to 1; zero-sum rows get equal weight
-    row_sums = df.sum(axis=1)
-    n_cols = len(returns.columns)
-    if n_cols > 0:
-        df.loc[row_sums <= 0] = 1.0 / n_cols
-    row_sums = df.sum(axis=1)
-    df = df.div(row_sums, axis=0).fillna(0)
-
     stats = {
-        "n_rebalance_dates": n_rebalance_dates,
+        "n_rebalance_dates": len(weight_rows),
         "n_risk_parity_requested": n_risk_parity_requested,
         "n_risk_parity_skipped": n_risk_parity_skipped,
     }
-    return df, stats
+    return df.fillna(0), stats
 
 
 def compute_rebalance_cost(
@@ -325,7 +267,6 @@ def _blend_weights(regime_probs: dict) -> pd.Series:
             + P(ice)*w_ice   + P(recovery)*w_recovery
 
     Probabilities are re-normalised here in case of floating-point drift.
-    Returns a Series indexed by ticker (supports both logical and ticker allocation keys).
     """
     prob_map = {
         "prob_fire":     "fire",
@@ -340,7 +281,7 @@ def _blend_weights(regime_probs: dict) -> pd.Series:
         regime_probs = {k: 0.25 for k in regime_probs}
         total = 1.0
 
-    blended_by_ticker: dict[str, float] = {}
+    blended_by_ticker = {}
     for prob_key, alloc_key in prob_map.items():
         p = regime_probs.get(prob_key, 0) / total
         raw = ALLOC_CFG.get(alloc_key, {})
@@ -391,20 +332,6 @@ def _apply_risk_parity(
     appear in the returns DataFrame.  Zero-weight assets (e.g., CTA
     in synthetic mode — handled separately by momentum_signals.py)
     are left at zero and the remaining weights are renormalised.
-
-    Covariance regularization (config risk_parity.covariance_shrinkage):
-        With only 12–24 months of returns the sample covariance is noisy and
-        can be ill-conditioned, leading to unstable or extreme weights. We
-        shrink the sample covariance towards a diagonal matrix (keeping only
-        the variances). That reduces the influence of estimated correlations
-        when we have thin history and stabilizes the risk-parity solution.
-        Shrinkage = 0 means no regularization; 0.1–0.3 is typical for monthly
-        data with short lookbacks.
-
-    When history is short (config risk_parity.thin_history_months /
-    shrinkage_when_thin): If the number of return observations is below
-    thin_history_months, we use shrinkage_when_thin instead of
-    covariance_shrinkage so that results stay stable with 12–18 months of data.
     """
     active = [
         a for a in base_weights.index
@@ -412,28 +339,10 @@ def _apply_risk_parity(
     ]
 
     if len(active) < 2:
-        logger.debug("Risk parity: fewer than 2 active assets — returning base weights.")
+        logger.warning("Risk parity: fewer than 2 active assets — returning base weights.")
         return base_weights
 
-    cov_df = returns[active].cov() * 12   # Annualised sample covariance
-    base_shrinkage = RP_CFG.get("covariance_shrinkage", 0.0)
-    thin_months = RP_CFG.get("thin_history_months")
-    shrink_when_thin = RP_CFG.get("shrinkage_when_thin")
-    n_obs = len(returns)
-    if thin_months is not None and shrink_when_thin is not None and n_obs < int(thin_months):
-        # With short history use higher shrinkage for stability (see config notes)
-        shrinkage = float(shrink_when_thin)
-    else:
-        shrinkage = float(base_shrinkage) if base_shrinkage else 0.0
-    if shrinkage > 0:
-        # Shrink towards diagonal (variances only) so that in thin-history
-        # periods we don't overfit noisy correlations. The target is diag(var);
-        # cov_shrunk = (1 - α) * cov + α * diag(var).
-        alpha = float(shrinkage)
-        var = np.diag(cov_df.values)
-        cov_shrunk = (1 - alpha) * cov_df.values + alpha * np.diag(var)
-        cov_df = pd.DataFrame(cov_shrunk, index=cov_df.index, columns=cov_df.columns)
-    cov = cov_df
+    cov = returns[active].cov() * 12        # annualised covariance
     w   = base_weights[active].values.astype(float)
     w   = w / w.sum()
 

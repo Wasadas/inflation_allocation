@@ -11,7 +11,11 @@ the first month. This test asserts that later months are unchanged.
 
 import numpy as np
 import pandas as pd
-import pytest
+
+try:
+    import pytest
+except ImportError:
+    pytest = None
 
 
 def _minimal_cpi_df(n_months: int = 36, first_accel: float = 0.0) -> pd.DataFrame:
@@ -26,17 +30,24 @@ def _minimal_cpi_df(n_months: int = 36, first_accel: float = 0.0) -> pd.DataFram
     )
 
 
-@pytest.fixture
-def classifier():
+def _get_classifier():
     from fire_ice_model.regime_engine.classifier import RegimeClassifier
     return RegimeClassifier()
 
 
-def test_acceleration_scaling_is_rolling_only(classifier):
+if pytest is not None:
+    @pytest.fixture
+    def classifier():
+        return _get_classifier()
+
+
+def test_acceleration_scaling_is_rolling_only(classifier=None):
     """
     Changing only the first month's acceleration must not change probabilities
     for months beyond the rolling window (24). With full-sample std it would.
     """
+    if classifier is None:
+        classifier = _get_classifier()
     scale_window = 24  # from config
     # Run A: first month acceleration = 0
     cpi_a = _minimal_cpi_df(n_months=36, first_accel=0.0)
@@ -47,13 +58,17 @@ def test_acceleration_scaling_is_rolling_only(classifier):
 
     prob_cols = ["prob_fire", "prob_boom", "prob_ice", "prob_recovery"]
     if not all(c in out_a.columns for c in prob_cols):
-        pytest.skip("Classifier not in probability mode (use_regime_probability=False)")
+        if pytest is not None:
+            pytest.skip("Classifier not in probability mode (use_regime_probability=False)")
+        raise SystemExit("SKIP: Classifier not in probability mode (use_regime_probability=False)")
 
     # Months after the rolling window: from row scale_window onward, probabilities
     # must be identical (only the first month's acceleration changed; rolling window
     # at these rows does not include that first month, so no change).
     if len(out_a) <= scale_window:
-        pytest.skip("Not enough months to test rolling window")
+        if pytest is not None:
+            pytest.skip("Not enough months to test rolling window")
+        raise SystemExit("SKIP: Not enough months to test rolling window")
     later_a = out_a.iloc[scale_window:]
     later_b = out_b.iloc[scale_window:]
     for c in prob_cols:
@@ -68,6 +83,5 @@ if __name__ == "__main__":
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
-    from fire_ice_model.regime_engine.classifier import RegimeClassifier
-    test_acceleration_scaling_is_rolling_only(RegimeClassifier())
+    test_acceleration_scaling_is_rolling_only(_get_classifier())
     print("OK: acceleration scaling is rolling-only.")

@@ -19,3 +19,8 @@ venv/
 # Data & outputs (common)
 data/
 outputs/
+
+# Fire & Ice: cache and reports
+.cache/
+reports/
+*.parquet

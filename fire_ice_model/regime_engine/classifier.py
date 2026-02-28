@@ -451,11 +451,11 @@ class RegimeClassifier:
 
 
 # ------------------------------------------------------------------
-# Convenience wrapper
+# Convenience wrapper (optional API for scripts/notebooks)
 # ------------------------------------------------------------------
 
 def classify_regimes(cpi_df: pd.DataFrame, **kwargs) -> pd.DataFrame:
-    """Module-level convenience wrapper around RegimeClassifier."""
+    """Module-level convenience wrapper around RegimeClassifier. Not used by the backtest (which calls RegimeClassifier().classify(cpi) directly)."""
     return RegimeClassifier(**kwargs).classify(cpi_df)
 
 

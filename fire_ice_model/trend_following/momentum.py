@@ -1,5 +1,5 @@
 """
-trend_following/momentum_signals.py
+trend_following/momentum.py
 
 Implements Time-Series Momentum (TSMOM) — the "Holy Grail" asset in
 Neville et al. (2021). The paper shows that trend-following CTAs
