@@ -31,11 +31,28 @@
 # --- Regime Classification (The "Neville Switch") ---
 regime:
   inflation_threshold: 5.0        # Based on Neville's key 5% YoY CPI threshold when stock-bond corr. flips from - to +
+  # Publication lag: UK ONS releases CPI ~mid-month for the previous month. Weights at end of month T
+  # must use only CPI that was released by then. cpi_lag_months shifts the regime index so that
+  # regime at date T is based on CPI reference month T - cpi_lag_months (default 1 = no look-ahead).
+  cpi_lag_months: 1
   signal_mode: "zscore"           # "threshold" (Neville original) | "zscore" (Bauer)
   zscore_window: 120              # Rolling window in months (10 years of history)
-  zscore_threshold: 1.5           # SDs above rolling mean = "high inflation"
+  # Lower bar for "high inflation" so more months qualify as high+falling (BOOM). 1.2 SDs above
+  # rolling mean captures disinflationary phases that sit just below the original 1.5 cutoff.
+  zscore_threshold: 1.2
   use_regime_probability: true    # false = hard binary switch | true = smooth sigmoid
-  sigmoid_steepness: 3.0          # k: higher = steeper curve, closer to hard switch
+  # Softer transition at the boundary: k=2 gives a gentler rise/fall split so we don't require
+  # a very sharp move in acceleration to tip into BOOM; helps capture short disinflationary booms.
+  # k=1.5 softens further so FIRE weights blend in earlier when inflation is starting to rise
+  # (Neville: get into commodities/CTA before the full "fire" is obvious).
+  sigmoid_steepness: 1.5
+  # Regime must persist this many months before we confirm a switch. Set to 1 so short-lived
+  # BOOM (high+falling) transitions are not smoothed away; 2+ would hide brief disinflationary booms.
+  hysteresis_months: 1
+  # Time-aware scaling for acceleration in sigmoid (avoids data leakage): use rolling std
+  # so that at each date we only use past data to normalize. Walk-forward valid: at date t
+  # only past data in the window is used; no full-sample std.
+  acceleration_scale_window: 24   # Rolling window (months) for acceleration std in probability blend
   momentum_window: 12             # Months to measure CPI trend direction
   acceleration_window: 3          # Months for 2nd derivative (velocity)
   smoothing: "ewm"                # "rolling" or "ewm" for trend smoothing
@@ -63,24 +80,29 @@ assets:
 # Use ticker symbols for compatibility with get_returns().
 # Note: CTA column (e.g. DBMG.L) may be filled with synthetic series when no Bloomberg data is available.
 allocation:
+  # FIRE = High inflation + Rising trend. Neville: commodities and CTA win; bonds and equities fail.
+  # We max out inflation hedges (CMOD, DBMG) and keep duration/equities at a bare minimum (2%)
+  # so risk parity cannot dilute the intended tilt when we bypass it for FIRE (see regime_weighting).
   fire:
-    ISF.L:   0.05
-    VMID.L:  0.05
-    IGLT.L:  0.05
-    INXG.L:  0.05
-    IHYG.L:  0.05
-    CMOD.L:  0.35
-    SGLN.L:  0.15
-    DBMG.L:  0.25
+    ISF.L:   0.02   # Minimum; duration and equities are the main casualties in FIRE
+    VMID.L:  0.08
+    IGLT.L:  0.02
+    INXG.L:  0.02
+    IHYG.L:  0.08
+    CMOD.L:  0.35   # Real assets and commodities benefit when inflation is high and rising
+    SGLN.L:  0.08
+    DBMG.L:  0.35   # CTA/trend-following historically strong in FIRE (Neville ~25% ann. real)
   disinflationary_boom:
-    ISF.L:   0.20
+    # BOOM = High inflation + Falling trend (Neville: equities stabilise, duration benefits as inflation rolls over).
+    # Tilt toward duration (gilts/linkers) and away from commodities; optional CTA for transition diversification.
+    ISF.L:   0.10   # Reduced to fund duration/CTA tilt
     VMID.L:  0.15
-    IGLT.L:  0.10
-    INXG.L:  0.15
+    IGLT.L:  0.15   # +5%: nominal duration benefits when inflation is high but falling
+    INXG.L:  0.20   # +5%: linkers and real yields often compress in disinflation
     IHYG.L:  0.15
-    CMOD.L:  0.10
+    CMOD.L:  0.05   # -5%: commodities typically peak with inflation; cut in BOOM
     SGLN.L:  0.05
-    DBMG.L:  0.10
+    DBMG.L:  0.15   # +5%: CTA diversifies when inflation is in transition (optional tilt)
   ice:
     ISF.L:   0.20
     VMID.L:  0.10
@@ -105,9 +127,23 @@ risk_parity:
   enabled: true
   target_vol: 0.10
   lookback_vol_days: 60
+  # Optional: number of months of returns used for covariance (overrides lookback_vol_days when set).
+  # With only 12 months the covariance matrix is thin; results are more stable with longer history
+  # (e.g. 24). If unset, we use max(lookback_vol_days // 21, 12).
+  lookback_months: null
   min_weight: 0.02
   max_weight: 0.45
   reoptimise_frequency: "M"
+  # Covariance regularization: when we have few months of returns (e.g. 12–24), the
+  # sample covariance is noisy and can be ill-conditioned. Shrinking towards the
+  # diagonal (variances only) stabilizes the risk-parity solver. 0 = no shrinkage,
+  # 0.1–0.3 typical for thin history. Prevents extreme or unstable weights.
+  covariance_shrinkage: 0.15
+  # When history is shorter than this (months), use higher shrinkage for extra stability.
+  # Set to null to disable; e.g. 24 with shrinkage_when_thin: 0.25 means "if we have
+  # fewer than 24 months, use 0.25 instead of covariance_shrinkage".
+  thin_history_months: 24
+  shrinkage_when_thin: 0.25
 
 # --- Trend Following ---
 trend_following:
@@ -155,3 +191,7 @@ reporting:
   output_dir: "reports/"
   dashboard_port: 8050
   refresh_hours: 24
+  # Use BoE base rate (FRED BOERUKM) in Sharpe/Sortino so ratios reflect excess return over cash.
+  use_risk_free_rate: true
+  # When true, report real-wealth (CPI-deflated) metrics and show Real wealth in charts.
+  real_wealth: true

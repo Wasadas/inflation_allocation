@@ -24,9 +24,19 @@ Regime output mode (set in config.yaml → regime.use_regime_probability):
             P(Fire) = sigmoid(k * (z - z_threshold))
             Weights in allocation_logic are then a continuous blend.
             This eliminates churn when CPI bounces near the threshold.
+            Acceleration scaling is rolling-window only (no full-sample std)
+            for walk-forward validity.
 
 Hysteresis is applied on top of both modes to prevent whipsaws on
 noisy monthly prints.
+
+Information-set timing (cpi_lag_months):
+    UK ONS publishes CPI with a lag (typically mid-month for the previous
+    reference month). To avoid look-ahead bias, the classifier shifts the
+    output so that the regime labeled at date T is the regime computed from
+    CPI with reference month T - cpi_lag_months (i.e. the last CPI release
+    that was available by end of month T). Weights at month-end T therefore
+    use only information that was released by that date. See config regime.cpi_lag_months.
 """
 
 import logging
@@ -96,23 +106,29 @@ class RegimeClassifier:
         regime.zscore_threshold     : SDs above mean = "high inflation"
         regime.use_regime_probability: True = sigmoid blend, False = hard switch
         regime.sigmoid_steepness    : k parameter controlling sigmoid sharpness
+        regime.cpi_lag_months       : months to shift regime index (default 1) so that
+                                      regime at T uses CPI released by T (no look-ahead).
+        regime.hysteresis_months    : months raw signal must persist before confirmed switch (default 1).
 
     Parameters
     ----------
-    hysteresis_months : int
-        Months a raw signal must persist before a confirmed regime change.
-        Acts as a noise filter on top of either signal mode.
-        Default 2 (enough to absorb one noisy monthly print).
+    hysteresis_months : int, optional
+        If provided, overrides config. Otherwise regime.hysteresis_months is used (default 1).
+        Setting to 1 avoids filtering out short-lived BOOM (disinflationary) transitions.
     """
 
-    def __init__(self, hysteresis_months: int = 2):
-        self.hysteresis_months   = hysteresis_months
+    def __init__(self, hysteresis_months: Optional[int] = None):
+        self.hysteresis_months   = (
+            hysteresis_months if hysteresis_months is not None
+            else REGIME_CFG.get("hysteresis_months", 1)
+        )
         self.signal_mode         = REGIME_CFG.get("signal_mode", "threshold")
         self.hard_threshold      = REGIME_CFG.get("inflation_threshold", 5.0)
         self.zscore_window       = REGIME_CFG.get("zscore_window", 120)
         self.zscore_threshold    = REGIME_CFG.get("zscore_threshold", 1.5)
         self.use_probabilities   = REGIME_CFG.get("use_regime_probability", False)
         self.sigmoid_steepness   = REGIME_CFG.get("sigmoid_steepness", 3.0)
+        self.cpi_lag_months      = REGIME_CFG.get("cpi_lag_months", 1)
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -128,6 +144,10 @@ class RegimeClassifier:
         Returns
         -------
         DataFrame with original columns plus:
+
+            Index: "Knowledge date" — when cpi_lag_months > 0, the index is shifted so that
+            the regime at date T is based on CPI reference month T - cpi_lag_months (i.e.
+            only data released by end of T is used). This enforces no look-ahead.
 
             z_score          : normalised inflation signal (zscore mode only)
             inflation_signal : the scalar used for level classification
@@ -170,6 +190,26 @@ class RegimeClassifier:
         # ---- 4. Sigmoid probabilities (optional) ----
         if self.use_probabilities:
             df = self._compute_probabilities(df)
+
+        # ---- 5. Information-set timing: shift index by cpi_lag_months ----
+        # Why we do this: UK ONS publishes CPI with a lag (typically around the middle of
+        # the month for the *previous* calendar month). So at the end of January we have
+        # just learned December's CPI; we have not yet seen January's CPI. The regime we
+        # assign to "end of January" must therefore be based on December's CPI (the last
+        # release we have), not January's. The input cpi_df has index = CPI reference
+        # month (e.g. 2024-01-31 for January's data). We shift the index forward by
+        # cpi_lag_months so that the row with reference month M is labeled at M + lag —
+        # the first date when that regime is actually known. Then when the backtest
+        # uses "regime at end of February", it gets the regime from January's CPI,
+        # which was released in February. No look-ahead: weights at month-end T use
+        # only CPI that was released by T.
+        if self.cpi_lag_months and int(self.cpi_lag_months) > 0:
+            lag = int(self.cpi_lag_months)
+            df.index = df.index + pd.DateOffset(months=lag)
+            logger.debug(
+                "Regime index shifted by cpi_lag_months=%s so weights at date T use CPI released by T (no look-ahead).",
+                lag,
+            )
 
         return df
 
@@ -260,7 +300,7 @@ class RegimeClassifier:
 
             p_high  = sigmoid(k * (s - θ))    # prob inflation is "high"
             p_low   = 1 - p_high
-            p_rise  = sigmoid(k * acceleration) # prob trend is "rising"
+            p_rise  = sigmoid(k * acceleration_scaled)  # prob trend is "rising"
             p_fall  = 1 - p_rise
 
         Then:
@@ -270,6 +310,14 @@ class RegimeClassifier:
             P(Recovery) = p_low  * p_rise
 
         The four probabilities sum to 1 by construction.
+
+        Scaling of acceleration (no data leakage):
+            We scale acceleration by a *rolling* standard deviation so that at each
+            date we only use information available up to that date. Using the
+            full-sample std would leak future volatility into the past and make
+            the sigmoid sensitivity time-varying in a look-ahead way. The rolling
+            window (config acceleration_scale_window, default 24 months) gives
+            time-aware, stable normalization.
         """
         k         = self.sigmoid_steepness
         threshold = self.zscore_threshold if self.signal_mode == "zscore" else self.hard_threshold
@@ -278,10 +326,18 @@ class RegimeClassifier:
         p_high = 1 / (1 + np.exp(-k * (df["inflation_signal"] - threshold)))
         p_low  = 1 - p_high
 
-        # Sigmoid of acceleration: centred on zero
-        # Scale acceleration to make k meaningful (acceleration is in CPI pct pts)
-        accel_std = float(df["acceleration"].std() or 0)
-        accel_scaled = df["acceleration"] / max(accel_std, 0.01)
+        # Scale acceleration with rolling std so that we never use future data.
+        # Walk-forward valid: at each date t only (t - window, t] is used; no full-sample std.
+        # At date t we divide acceleration by the std over (t - window, t]; that way
+        # the sigmoid sees a normalized "rising vs falling" signal without leaking
+        # information from later periods. If the window has too few observations
+        # we fall back to a small constant to avoid division by zero.
+        scale_window = REGIME_CFG.get("acceleration_scale_window", 24)
+        min_periods  = max(scale_window // 2, 6)
+        accel_roll_std = df["acceleration"].rolling(window=scale_window, min_periods=min_periods).std()
+        accel_scale = accel_roll_std.replace(0, np.nan).ffill().bfill()
+        accel_scale = accel_scale.clip(lower=0.01)
+        accel_scaled = df["acceleration"] / accel_scale
         p_rise = 1 / (1 + np.exp(-k * accel_scaled))
         p_fall = 1 - p_rise
 

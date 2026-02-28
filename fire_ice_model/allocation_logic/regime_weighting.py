@@ -185,6 +185,18 @@ def build_weight_history(
     Automatically uses probability blending if classifier produced
     prob_fire / prob_boom / prob_ice / prob_recovery columns.
 
+    Risk-parity lookback (config risk_parity.lookback_months / lookback_vol_days):
+        Covariance is estimated from the last rp_months months of returns. With only
+        12 months the matrix is thin and weights can be noisy; results are more stable
+        with longer history (e.g. 24+ months). Set lookback_months: 24 in config to
+        use 24 months when available, or use higher covariance_shrinkage (or
+        shrinkage_when_thin) when history is short.
+
+    FIRE bypass: When the dominant regime is FIRE (High + Rising inflation), we skip
+        risk-parity optimization and use the raw base (or probability-blended) weights.
+        Equal-risk reweighting would otherwise dilute the intended tilt toward
+        commodities and CTA, which are the assets that historically perform in FIRE.
+
     Parameters
     ----------
     classified_df : Output of RegimeClassifier.classify()
@@ -195,7 +207,12 @@ def build_weight_history(
     Tuple of (DataFrame of weights indexed by date, stats dict with
     n_rebalance_dates, n_risk_parity_requested, n_risk_parity_skipped).
     """
-    rp_months     = max(RP_CFG.get("lookback_vol_days", 60) // 21, 12)
+    # Prefer explicit lookback_months for stability; else derive from days (min 12 months)
+    rp_months_cfg = RP_CFG.get("lookback_months")
+    if rp_months_cfg is not None and rp_months_cfg > 0:
+        rp_months = int(rp_months_cfg)
+    else:
+        rp_months = max(RP_CFG.get("lookback_vol_days", 60) // 21, 12)
     has_probs     = "prob_fire" in classified_df.columns
     use_prob      = REGIME_CFG.get("use_regime_probability", False) and has_probs
 
@@ -224,7 +241,13 @@ def build_weight_history(
         # Historical returns for covariance (no look-ahead)
         hist = returns.loc[:date].tail(rp_months)
 
-        if use_risk_parity and len(hist) >= 12:
+        # In FIRE we use raw base (or blended) weights and skip risk parity so the intended
+        # tilt to commodities and CTA is not diluted by equal-risk reweighting (Neville: these
+        # are the assets that perform when inflation is high and rising).
+        regime_str = str(regime).upper() if regime is not None else ""
+        skip_rp_for_fire = regime_str == "FIRE"
+
+        if use_risk_parity and len(hist) >= 12 and not skip_rp_for_fire:
             n_risk_parity_requested += 1
             base_weights = _blend_weights(probs) if use_prob and probs else _get_hard_weights(str(regime))
             active = [
@@ -368,6 +391,20 @@ def _apply_risk_parity(
     appear in the returns DataFrame.  Zero-weight assets (e.g., CTA
     in synthetic mode — handled separately by momentum_signals.py)
     are left at zero and the remaining weights are renormalised.
+
+    Covariance regularization (config risk_parity.covariance_shrinkage):
+        With only 12–24 months of returns the sample covariance is noisy and
+        can be ill-conditioned, leading to unstable or extreme weights. We
+        shrink the sample covariance towards a diagonal matrix (keeping only
+        the variances). That reduces the influence of estimated correlations
+        when we have thin history and stabilizes the risk-parity solution.
+        Shrinkage = 0 means no regularization; 0.1–0.3 is typical for monthly
+        data with short lookbacks.
+
+    When history is short (config risk_parity.thin_history_months /
+    shrinkage_when_thin): If the number of return observations is below
+    thin_history_months, we use shrinkage_when_thin instead of
+    covariance_shrinkage so that results stay stable with 12–18 months of data.
     """
     active = [
         a for a in base_weights.index
@@ -378,7 +415,25 @@ def _apply_risk_parity(
         logger.debug("Risk parity: fewer than 2 active assets — returning base weights.")
         return base_weights
 
-    cov = returns[active].cov() * 12        # annualised covariance
+    cov_df = returns[active].cov() * 12   # Annualised sample covariance
+    base_shrinkage = RP_CFG.get("covariance_shrinkage", 0.0)
+    thin_months = RP_CFG.get("thin_history_months")
+    shrink_when_thin = RP_CFG.get("shrinkage_when_thin")
+    n_obs = len(returns)
+    if thin_months is not None and shrink_when_thin is not None and n_obs < int(thin_months):
+        # With short history use higher shrinkage for stability (see config notes)
+        shrinkage = float(shrink_when_thin)
+    else:
+        shrinkage = float(base_shrinkage) if base_shrinkage else 0.0
+    if shrinkage > 0:
+        # Shrink towards diagonal (variances only) so that in thin-history
+        # periods we don't overfit noisy correlations. The target is diag(var);
+        # cov_shrunk = (1 - α) * cov + α * diag(var).
+        alpha = float(shrinkage)
+        var = np.diag(cov_df.values)
+        cov_shrunk = (1 - alpha) * cov_df.values + alpha * np.diag(var)
+        cov_df = pd.DataFrame(cov_shrunk, index=cov_df.index, columns=cov_df.columns)
+    cov = cov_df
     w   = base_weights[active].values.astype(float)
     w   = w / w.sum()
 
