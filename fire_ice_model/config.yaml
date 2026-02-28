@@ -1,0 +1,151 @@
+# ============================================================
+# Fire & Ice Model — Configuration
+# Neville et al. (2021) style regime allocation — UK Implementation
+# ============================================================
+# This model translates UK inflation dynamics into an investable asset
+# allocation process.
+#
+# It is grounded in the empirical finding that asset returns behave very
+# differently across inflation regimes. Academic research in macro asset
+# pricing (take Ilmanen, 2011; Ang, 2014; and regime-based allocation work
+# such as Neville et al., 2021) shows that both the LEVEL of inflation
+# and its DIRECTION OF CHANGE materially affect the relative performance
+# of equities, duration, credit, commodities, and trend strategies.
+#
+# The UK experience since the early 1990s — including:
+#   • the disinflationary bond bull market,
+#   • the post-GFC reflation period,
+#   • and the 2022–2023 inflation shock
+# provides clear evidence that rising vs falling inflation regimes lead
+# to structurally different cross-asset outcomes.
+#
+# Rather than forecasting inflation, this framework classifies the current
+# regime using observable UK CPI data and adjusts portfolio exposures
+# accordingly.
+#
+# The objective is robustness and transparency:
+#   • UK-focused data (ONS, BoE, FRED cross-checks)
+#   • Systematic regime rules
+#   • Explicit risk management and volatility targeting
+
+# --- Regime Classification (The "Neville Switch") ---
+regime:
+  inflation_threshold: 5.0        # Based on Neville's key 5% YoY CPI threshold when stock-bond corr. flips from - to +
+  signal_mode: "zscore"           # "threshold" (Neville original) | "zscore" (Bauer)
+  zscore_window: 120              # Rolling window in months (10 years of history)
+  zscore_threshold: 1.5           # SDs above rolling mean = "high inflation"
+  use_regime_probability: true    # false = hard binary switch | true = smooth sigmoid
+  sigmoid_steepness: 3.0          # k: higher = steeper curve, closer to hard switch
+  momentum_window: 12             # Months to measure CPI trend direction
+  acceleration_window: 3          # Months for 2nd derivative (velocity)
+  smoothing: "ewm"                # "rolling" or "ewm" for trend smoothing
+  ewm_span: 6                     # Span for exponential smoothing
+
+# --- Asset Universe (all GBP, London-listed) ---
+assets:
+  equities:
+    uk_large_cap:    "ISF.L"      # FTSE 100
+    uk_mid_cap:      "VMID.L"     # FTSE 250
+  bonds:
+    gilts:           "IGLT.L"     # Nominal Duration
+    linkers:         "INXG.L"     # UK Index-Linked
+    high_yield:      "IHYG.L"     # Credit spread exposure
+  real_assets:
+    commodities:     "CMOD.L"     # Broad basket
+    gold:            "SGLN.L"     # Monetary hedge
+  trend:
+    cta_proxy: "WTMA.L"           # Live ETF proxy (GBP)
+
+# --- Regime-Conditional Weights ---
+# Allocation keys must match returns DataFrame columns (tickers).
+# Use ticker symbols for compatibility with get_returns().
+allocation:
+  fire:
+    ISF.L:   0.05
+    VMID.L:  0.05
+    IGLT.L:  0.05
+    INXG.L:  0.05
+    IHYG.L:  0.05
+    CMOD.L:  0.35
+    SGLN.L:  0.15
+    WTMA.L:  0.25
+  disinflationary_boom:
+    ISF.L:   0.20
+    VMID.L:  0.15
+    IGLT.L:  0.10
+    INXG.L:  0.15
+    IHYG.L:  0.15
+    CMOD.L:  0.10
+    SGLN.L:  0.05
+    WTMA.L:  0.10
+  ice:
+    ISF.L:   0.20
+    VMID.L:  0.10
+    IGLT.L:  0.40
+    INXG.L:  0.10
+    IHYG.L:  0.05
+    CMOD.L:  0.05
+    SGLN.L:  0.05
+    WTMA.L:  0.05
+  reflationary_recovery:
+    ISF.L:   0.15
+    VMID.L:  0.20
+    IGLT.L:  0.10
+    INXG.L:  0.20
+    IHYG.L:  0.15
+    CMOD.L:  0.10
+    SGLN.L:  0.05
+    WTMA.L:  0.05
+
+# --- Risk Parity ---
+risk_parity:
+  enabled: true
+  target_vol: 0.10
+  lookback_vol_days: 60
+  min_weight: 0.02
+  max_weight: 0.45
+  reoptimise_frequency: "M"
+
+# --- Trend Following ---
+trend_following:
+  signal_type: "tsmom"
+  lookback_months: 12
+  cta_mode: "synthetic"           # "etf" | "synthetic"
+  assets_to_trend:
+    - "ISF.L"
+    - "IGLT.L"
+    - "INXG.L"
+    - "CMOD.L"
+    - "SGLN.L"
+    - "IHYG.L"
+  position_sizing: "vol_scaled"
+  vol_target_per_signal: 0.02
+
+# --- Backtest ---
+backtest:
+  start_date: "2005-01-01"
+  end_date: null
+  rebalance_frequency: "M"
+  transaction_cost_bps: 10
+  benchmark: "6040"
+  base_currency: "GBP"
+
+# --- Data Sources ---
+data:
+  cache_dir: ".cache/parquet"
+  fred_series:
+    uk_cpi:         "GBRCPIALLMINMEI"
+    uk_pmi:         "GBRPMI"
+    uk_base_rate:   "BOERUKM"
+    uk_rpi:         "GBRCP0000EIQ"
+  boe_api_base: "https://www.bankofengland.co.uk/boeapps/database"
+  ons_csv_generator_base: "https://www.ons.gov.uk/generator"
+  ons_cpi_uri: "/economy/inflationandpriceindices/timeseries/d7bt/mm23"
+  ons_series_id: "d7bt"
+  ons_dataset_id: "mm23"
+
+# --- Reporting ---
+reporting:
+  output_dir: "reports/"
+  dashboard_port: 8050
+  refresh_hours: 24
