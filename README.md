@@ -51,14 +51,3 @@ With pytest:
 ```bash
 pytest fire_ice_model/tests/ -v
 ```
-
-## Publish to GitHub
-1. Create a new repo at [github.com/new](https://github.com/new) (e.g. `inflation-allocation`).
-2. Set the remote (replace `YOUR_USERNAME` with your GitHub username):
-   ```bash
-   git remote set-url origin https://github.com/YOUR_USERNAME/inflation-allocation.git
-   ```
-3. Push:
-   ```bash
-   git push -u origin main
-   ```
