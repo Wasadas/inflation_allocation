@@ -11,8 +11,7 @@ A UK-focused, inflation-regime tactical allocation model based on Neville et al.
 | Sharpe | 0.18 | 0.53 |
 | Max drawdown | -19.2% | -14.4% |
 
-Charts are written to `reports/backtest_charts.html` after running the backtest. To share with recruiters: host the HTML on [GitHub Pages](https://pages.github.com/) or add a screenshot to `docs/backtest_sample.png`.
-
+Charts are written to `reports/backtest_charts.html` after running the backtest. 
 ## Goals
 - Classify inflation regimes (FIRE / BOOM / ICE / RECOVERY) from UK CPI
 - Backtest regime-conditional allocation vs a 60/40 benchmark
