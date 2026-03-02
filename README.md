@@ -2,6 +2,17 @@
 
 A UK-focused, inflation-regime tactical allocation model based on Neville et al. (2021). It classifies the macro regime from published UK CPI (level × direction) and applies regime-specific portfolio weights with optional risk parity.
 
+## Results (sample backtest, 2005–2026)
+
+| Metric | Fire & Ice | 60/40 Benchmark |
+|--------|------------|-----------------|
+| Ann. return | 0.9% | 4.3% |
+| Ann. vol | 5.3% | 8.1% |
+| Sharpe | 0.18 | 0.53 |
+| Max drawdown | -19.2% | -14.4% |
+
+Charts are written to `reports/backtest_charts.html` after running the backtest. To share with recruiters: host the HTML on [GitHub Pages](https://pages.github.com/) or add a screenshot to `docs/backtest_sample.png`.
+
 ## Goals
 - Classify inflation regimes (FIRE / BOOM / ICE / RECOVERY) from UK CPI
 - Backtest regime-conditional allocation vs a 60/40 benchmark
@@ -29,19 +40,26 @@ pip install -r requirements.txt
 ## Run
 From the project root with the venv activated:
 ```bash
-PYTHONPATH=. python fire_ice_model/regime_engine/backtest_engine.py
-```
-Or use the venv Python explicitly:
-```bash
-PYTHONPATH=. .venv/bin/python fire_ice_model/regime_engine/backtest_engine.py
+python -m fire_ice_model.regime_engine.backtest_engine
 ```
 Charts are written to `reports/backtest_charts.html` (open in a browser).
 
 ## Tests
 ```bash
-PYTHONPATH=. python fire_ice_model/tests/test_classifier_acceleration.py
+python fire_ice_model/tests/test_classifier_acceleration.py
 ```
-With pytest installed:
+With pytest:
 ```bash
-PYTHONPATH=. pytest fire_ice_model/tests/ -v
+pytest fire_ice_model/tests/ -v
 ```
+
+## Publish to GitHub
+1. Create a new repo at [github.com/new](https://github.com/new) (e.g. `inflation-allocation`).
+2. Set the remote (replace `YOUR_USERNAME` with your GitHub username):
+   ```bash
+   git remote set-url origin https://github.com/YOUR_USERNAME/inflation-allocation.git
+   ```
+3. Push:
+   ```bash
+   git push -u origin main
+   ```
