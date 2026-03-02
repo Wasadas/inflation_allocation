@@ -1,72 +1,14 @@
 """
-data_ingestion/cpi_handler.py
+Fetch and tidy UK CPI into a small set of signals the rest of the model can use.
 
-This module fetches UK inflation data (CPI) and transforms it into the
-core signals used in the Neville-style macro regime framework.
+From the raw CPI index we produce:
+    - year‑on‑year CPI (level)
+    - a simple trend measure
+    - an acceleration series based on the change in trend
 
-PREAMBLE 
-Inflation is not just a number and it is a regime-defining force in financial
-markets. Academic research (e.g. Ilmanen, 2011; Ang, 2014; and the broader
-regime literature) shows that asset returns behave very differently depending
-on whether inflation is:
-
-    1) Low and stable
-    2) High and rising
-    3) High but falling
-    4) Re-accelerating after a decline
-
-The Neville framework formalises this by focusing not only on the LEVEL
-of inflation, but also its MOMENTUM and ACCELERATION.
-
-What we compute
----------------
-From the raw CPI index we derive three key components:
-
-1. YoY CPI (level)
-   The year-on-year percentage change.
-   This captures whether inflation is economically meaningful.
-   A commonly used macro threshold (e.g., 5%) is used to flag “high inflation”.
-
-2. Trend (1st derivative)
-   A smoothed 12-month momentum measure.
-   This tells us whether inflation pressure is building or easing.
-   Markets are highly sensitive to changes in trend, not just levels.
-
-3. Acceleration (2nd derivative)
-   The 3-month change in trend.
-   This is the “velocity” of inflation.
-   It distinguishes:
-       - High but decelerating inflation (Boom)
-       - High and accelerating inflation (Fire)
-
-This second derivative is particularly important. Research in macro
-asset pricing shows that turning points in inflation momentum often
-drive large cross-asset reallocations.
-
-Data sources
-------------
-We rely only on free public data. NO BQL / Bloomberg or client data was used.
-
-- FRED (St. Louis Fed): UK CPI All Items (GBRCPIALLMINMEI)
-- ONS (UK Office for National Statistics): direct CPI index download
-- Bank of England (optional context for policy regime)
-
-Design philosophy
------------------
-The goal is robustness:
-- No API keys required
-- Automatic fallback between ONS and FRED
-- Caching to ensure reproducibility
-- Clean monthly time index only (no annual artifacts)
-
-The output is a DataFrame suitable for:
-- Regime classification
-- Asset allocation backtests
-- Inflation surprise modelling
-- Macro risk overlays
-
-OBLIGATORY DISCLAIMER: the module does not forecast inflation.
-It classifies the inflation regime using observable data.
+Data comes from public ONS / FRED endpoints and is cached locally so repeated
+runs are fast and reproducible. The goal here is not to forecast inflation,
+just to label the current environment in a consistent way.
 """
 
 import logging

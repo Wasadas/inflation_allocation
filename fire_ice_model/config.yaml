@@ -1,33 +1,11 @@
-# ============================================================
-# Fire & Ice Model — Configuration
-# Neville et al. (2021) style regime allocation — UK Implementation
-# ============================================================
-# This model translates UK inflation dynamics into an investable asset
-# allocation process.
-#
-# It is grounded in the empirical finding that asset returns behave very
-# differently across inflation regimes. Academic research in macro asset
-# pricing (take Ilmanen, 2011; Ang, 2014; and regime-based allocation work
-# such as Neville et al., 2021) shows that both the LEVEL of inflation
-# and its DIRECTION OF CHANGE materially affect the relative performance
-# of equities, duration, credit, commodities, and trend strategies.
-#
-# The UK experience since the early 1990s — including:
-#   • the disinflationary bond bull market,
-#   • the post-GFC reflation period,
-#   • and the 2022–2023 inflation shock
-# provides clear evidence that rising vs falling inflation regimes lead
-# to structurally different cross-asset outcomes.
-#
-# Rather than forecasting inflation, this framework classifies the current
-# regime using observable UK CPI data and adjusts portfolio exposures
-# accordingly.
-#
-# The objective is robustness and transparency:
-#   • UK-focused data (ONS, BoE, FRED cross-checks)
-#   • Systematic regime rules
-#   • Explicit risk management and volatility targeting
-# --- Regime Classification (The "Neville Switch") ---
+# Fire & Ice model — config
+# -------------------------
+# Parameters for the UK inflation‑regime backtest.
+# The idea is simple: use UK CPI to label the regime and then tilt
+# a small ETF portfolio accordingly. Everything here is meant to be
+# easy to tweak rather than perfectly calibrated.
+
+# --- Regime classification (the "Neville switch") ---
 
 # Logic: These parameters drive the state-machine that decides 
 # whether the model is in a 'Fire' or 'Ice' state.

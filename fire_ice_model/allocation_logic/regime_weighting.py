@@ -2,33 +2,16 @@
 """
 allocation_logic/regime_weighting.py
 
-Converts the Neville regime classification into portfolio weights.
+Turn regime labels into portfolio weights.
 
-Two output modes — both read from config.yaml:
+Depending on config we either:
+    - jump straight to the weight block for the active regime, or
+    - blend all regime weight sets using their probabilities.
 
-    use_regime_probability: false  →  HARD SWITCH
-        Weights snap to the allocation block for the active regime.
-        Fast and transparent, but causes churn near threshold.
-
-    use_regime_probability: true   →  PROBABILITY BLEND
-        Weights are a continuous blend of all four regime weight sets,
-        weighted by their sigmoid probabilities from classifier.py:
-
-            w_t = P(fire)*w_fire + P(boom)*w_boom
-                + P(ice)*w_ice   + P(recovery)*w_recovery
-
-        This eliminates discrete jumps at the threshold and naturally
-        reduces turnover when the regime signal is ambiguous.
-
-Risk Parity (optional, config: risk_parity.enabled):
-    The blended or hard weights are used as a STARTING POINT for a
-    risk parity optimiser that scales positions so each asset
-    contributes equally to portfolio volatility.
-
-CTA mode (config: trend_following.cta_mode):
-    "etf"       → use assets.trend.cta_proxy ticker (WTMA.L)
-    "synthetic" → CTA weight is allocated to the synthetic trend signal
-                  built in trend_following/momentum_signals.py
+An optional risk‑parity step then reshapes the weights so each asset
+contributes roughly the same amount of risk. CTA exposure can be taken
+from a live ETF or from the synthetic trend signal, again controlled
+purely through config.
 """
 
 import logging

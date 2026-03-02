@@ -1,25 +1,13 @@
 """
-backtest/engine.py
+backtest_engine.py
 
-Vectorised backtest engine for the Fire & Ice model.
+Monthly backtest for the Fire & Ice portfolio.
+Handles position updates, transaction costs and regime tagging so we
+can compare the strategy to a simple 60/40 benchmark.
 
-Simulates monthly rebalancing, applies transaction costs, and
-produces a full return history decomposed by regime.
-
-Information-set timing (no look-ahead):
-    1) CPI lag: Weights at month-end T are based on the regime at T, which
-       the RegimeClassifier derives from CPI reference month T - cpi_lag_months
-       (e.g. December CPI for January's regime), i.e. only data that was
-       released by end of T. See config regime.cpi_lag_months and the
-       classifier's index shift.
-    2) Return attribution: The return r_T is earned *during* month T. We
-       therefore attribute r_T to the weights we held at the *start* of T
-       (prev_wts), not the weights we set at end of T (w_T). Using prev_wts
-       for gross_T removes look-ahead between the regime signal and asset
-       returns. See the comment block above the main backtest loop.
-    Together, (1) and (2) ensure the backtest is implementable in real time.
-
-Benchmark: 60/40 (ISF.L / IGLT.L)
+The timing convention is “no look‑ahead”: weights at month‑end T only
+use CPI information that would have been available by then, and we
+attribute r_T to the weights held at the start of the month.
 """
 
 import logging
