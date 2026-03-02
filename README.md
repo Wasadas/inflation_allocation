@@ -11,22 +11,26 @@ A UK-focused, inflation-regime tactical allocation model based on Neville et al.
 | Sharpe | 0.18 | 0.53 |
 | Max drawdown | -19.2% | -14.4% |
 
-Charts are written to `reports/backtest_charts.html` after running the backtest. 
+Charts are written to `reports/backtest_charts.html` after running the backtest.
+
+## Discussion and limitations
+
+In this simple implementation the Fire and Ice portfolio ends up trading less and hugging cash and bonds more than a classic 60/40, so it gives up some return and Sharpe in exchange for lower volatility. If I had more time I would tune the regime definitions and trend signals, and experiment with extra assets or risk controls, to see whether the idea survives in a richer but still realistic setup.
 ## Goals
-- Classify inflation regimes (FIRE / BOOM / ICE / RECOVERY) from UK CPI
-- Backtest regime-conditional allocation vs a 60/40 benchmark
-- Report nominal and real wealth metrics, with BoE risk-free rate in Sharpe/Sortino
+Classify inflation regimes (FIRE / BOOM / ICE / RECOVERY) from UK CPI.
+Backtest regime-conditional allocation vs a 60/40 benchmark.
+Report nominal and real wealth metrics, with BoE risk-free rate in Sharpe/Sortino.
 
 ## Structure
-- `fire_ice_model/` — main package
-  - `data_ingestion/` — CPI (ONS/FRED), asset prices, BoE rate
-  - `regime_engine/` — classifier, backtest, metrics
-  - `allocation_logic/` — regime weights, risk parity
-  - `trend_following/` — synthetic CTA (TSMOM)
-  - `analysis/` — Plotly charts (cumulative returns, weight heatmap)
-  - `tests/` — unit tests
-- `fire_ice_model/config.yaml` — regime, allocation, backtest, and data settings
-- Cache and outputs: `.cache/parquet/` (data), `reports/` (HTML charts) — not committed
+`fire_ice_model/` — main package.
+`data_ingestion/` — CPI (ONS/FRED), asset prices, BoE rate.
+`regime_engine/` — classifier, backtest, metrics.
+`allocation_logic/` — regime weights, risk parity.
+`trend_following/` — synthetic CTA (TSMOM).
+`analysis/` — Plotly charts (cumulative returns, weight heatmap).
+`tests/` — unit tests.
+`fire_ice_model/config.yaml` — regime, allocation, backtest, and data settings.
+Cache and outputs live under `.cache/parquet/` for data and `reports/` for HTML charts; these are not committed.
 
 ## Setup
 ```bash
