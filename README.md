@@ -51,3 +51,5 @@ Charts are written to `reports/backtest_charts.html` (open in a browser).
 ```bash
 python fire_ice_model/tests/test_classifier_acceleration.py
 ```
+<img width="826" height="717" alt="Inflation_allocation" src="https://github.com/user-attachments/assets/d8e87385-27b2-4e44-a24e-bb67c8b12603" />
+
