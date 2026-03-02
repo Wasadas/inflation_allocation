@@ -144,6 +144,15 @@ def plot_weight_heatmap(
     if w.empty or w.columns.empty:
         return go.Figure()
 
+    # Drop the long flat section before the portfolio is actually invested
+    total = w.sum(axis=1)
+    if total.gt(0.01).any():
+        first_live = total[total.gt(0.01)].index[0]
+        w = w.loc[first_live:]
+
+    # Zero-out tiny weights to avoid noisy background
+    w = w.where(w >= 0.02, 0.0)
+
     # Put DBMG and CMOD early so FIRE tilt is easy to spot
     priority = ["DBMG.L", "CMOD.L", "IGLT.L", "INXG.L", "ISF.L", "VMID.L", "IHYG.L", "SGLN.L"]
     cols = [c for c in priority if c in w.columns]
@@ -157,7 +166,7 @@ def plot_weight_heatmap(
             z=w.values.T,
             colorscale="Blues",
             zmin=0,
-            zmax=0.5,
+            zmax=0.25,
             hovertemplate="%{x|%b %Y}<br>%{y}: %{z:.1%}<extra></extra>",
         )
     )
@@ -246,13 +255,22 @@ def save_backtest_charts(
     # Align weights to backtest dates (one row per month) so the heatmap matches the timeline above
     w = weights.reindex(results.index.sort_values(), method="ffill").fillna(0)
     if not w.empty and not w.columns.empty:
+        # Focus on periods where the portfolio is actually invested
+        total = w.sum(axis=1)
+        if total.gt(0.01).any():
+            first_live = total[total.gt(0.01)].index[0]
+            w = w.loc[first_live:]
+
+        # Suppress very small weights to reduce visual noise
+        w = w.where(w >= 0.02, 0.0)
+
         priority = ["DBMG.L", "CMOD.L", "IGLT.L", "INXG.L", "ISF.L", "VMID.L", "IHYG.L", "SGLN.L"]
         cols = [c for c in priority if c in w.columns] + [c for c in w.columns if c not in priority]
         w = w[cols]
         fig.add_trace(
             go.Heatmap(
                 x=w.index, y=w.columns, z=w.values.T,
-                colorscale="Blues", zmin=0, zmax=0.5,
+                colorscale="Blues", zmin=0, zmax=0.25,
                 hovertemplate="%{x|%b %Y}<br>%{y}: %{z:.1%}<extra></extra>",
             ),
             row=2, col=1,
