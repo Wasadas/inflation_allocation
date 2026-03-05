@@ -1,17 +1,6 @@
-# Inflation Allocation (Fire & Ice)
+# Inflation Allocation (Fire & Ice) Research project analysing inflation regimes and their impact on cross-asset portfolio behaviour.
 
-A UK-focused, inflation-regime tactical allocation model based on Neville et al. (2021). It classifies the macro regime from published UK CPI (level × direction) and applies regime-specific portfolio weights with optional risk parity.
-
-## Results (sample backtest, 2005–2026)
-
-| Metric | Fire & Ice | 60/40 Benchmark |
-|--------|------------|-----------------|
-| Ann. return | 0.9% | 4.3% |
-| Ann. vol | 5.3% | 8.1% |
-| Sharpe | 0.18 | 0.53 |
-| Max drawdown | -19.2% | -14.4% |
-
-Charts are written to `reports/backtest_charts.html` after running the backtest.
+This project explores whether inflation regimes can help explain cross-asset portfolio behaviour. Inspired by Neville et al. (2021), the model classifies inflation environments using UK CPI level and direction and applies regime-specific allocation rules. The goal is not to optimise returns but to study how inflation dynamics affect asset class performance and portfolio risk.
 
 ## Discussion and limitations
 
@@ -32,6 +21,16 @@ Report nominal and real wealth metrics, with BoE risk-free rate in Sharpe/Sortin
 `fire_ice_model/config.yaml` — regime, allocation, backtest, and data settings.
 Cache and outputs live under `.cache/parquet/` for data and `reports/` for HTML charts; these are not committed.
 
+## Results (sample backtest, 2005–2026)
+
+| Metric | Fire & Ice | 60/40 Benchmark |
+|--------|------------|-----------------|
+| Ann. return | 0.9% | 4.3% |
+| Ann. vol | 5.3% | 8.1% |
+| Sharpe | 0.18 | 0.53 |
+| Max drawdown | -19.2% | -14.4% |
+
+Charts are written to `reports/backtest_charts.html` after running the backtest.
 ## Setup
 ```bash
 cd "/path/to/Inflation allocation"
@@ -52,4 +51,5 @@ Charts are written to `reports/backtest_charts.html` (open in a browser).
 python fire_ice_model/tests/test_classifier_acceleration.py
 ```
 <img width="826" height="717" alt="Inflation_allocation" src="https://github.com/user-attachments/assets/d8e87385-27b2-4e44-a24e-bb67c8b12603" />
+
 
