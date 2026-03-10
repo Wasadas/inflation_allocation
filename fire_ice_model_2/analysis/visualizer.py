@@ -13,6 +13,7 @@ from pathlib import Path
 import pandas as pd
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+import plotly.io as pio
 
 # Regime background colours (Red=FIRE, Blue=ICE, Green=RECOVERY, Yellow=BOOM)
 REGIME_COLOURS = {
@@ -189,8 +190,12 @@ def save_backtest_charts(
     output_path: str | Path,
 ) -> Path:
     """
-    Build both charts and save a single interactive HTML file (two figures stacked).
-    Creates the output directory if needed.
+    Build both charts and save:
+
+    - A lightweight interactive HTML (Plotly JS loaded from CDN, not inlined).
+    - A static PNG snapshot alongside it for use in docs / README.
+
+    The HTML path is returned; the PNG uses the same stem with a .png extension.
     """
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,5 +290,21 @@ def save_backtest_charts(
     fig.update_xaxes(title_text="", row=2, col=1)
     fig.update_yaxes(title_text="NAV", row=1, col=1)
     fig.update_yaxes(title_text="", row=2, col=1)
-    fig.write_html(str(output_path))
+
+    # Lightweight HTML: do not inline the Plotly JS bundle; load it from CDN instead.
+    html_str = pio.to_html(
+        fig,
+        full_html=True,
+        include_plotlyjs="cdn",
+    )
+    output_path.write_text(html_str, encoding="utf-8")
+
+    # Static PNG snapshot (best-effort; if kaleido or orca are missing, skip without failing the backtest).
+    png_path = output_path.with_suffix(".png")
+    try:
+        pio.write_image(fig, png_path, width=1200, height=800, scale=2)
+    except Exception:
+        # Plotly static image export is optional; ignore if the dependency is not available.
+        pass
+
     return output_path
