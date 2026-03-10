@@ -26,14 +26,18 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 # Config
 # ------------------------------------------------------------------
-CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 
 with open(CONFIG_PATH) as f:
     CONFIG = yaml.safe_load(f)
 
 REGIME_CFG = CONFIG["regime"]
 DATA_CFG   = CONFIG["data"]
-CACHE_DIR  = Path(DATA_CFG["cache_dir"])
+# Resolve cache_dir relative to project root so it works regardless of cwd
+_package_root = CONFIG_PATH.resolve().parent
+_project_root = _package_root.parent
+_cache_dir_cfg = DATA_CFG["cache_dir"]
+CACHE_DIR  = (_project_root / _cache_dir_cfg).resolve() if not Path(_cache_dir_cfg).is_absolute() else Path(_cache_dir_cfg)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 

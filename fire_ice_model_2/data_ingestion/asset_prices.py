@@ -21,12 +21,16 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 with open(CONFIG_PATH) as f:
     CONFIG = yaml.safe_load(f)
 
 DATA_CFG = CONFIG["data"]
-CACHE_DIR = Path(DATA_CFG["cache_dir"])
+# Resolve cache_dir relative to project root (parent of fire_ice_model_2) so it works regardless of cwd
+_package_root = CONFIG_PATH.resolve().parent
+_project_root = _package_root.parent
+_cache_dir_cfg = DATA_CFG["cache_dir"]
+CACHE_DIR = (_project_root / _cache_dir_cfg).resolve() if not Path(_cache_dir_cfg).is_absolute() else Path(_cache_dir_cfg)
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 # CTA/trend proxy: config lists a primary ticker (e.g. DBMG.L); when no Bloomberg data is available

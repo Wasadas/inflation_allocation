@@ -21,13 +21,31 @@ from .classifier import CANONICAL_REGIME_LABELS
 
 logger = logging.getLogger(__name__)
 
-CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 with open(CONFIG_PATH) as f:
     CONFIG = yaml.safe_load(f)
+
+# Project root (parent of fire_ice_model_2) for resolving relative config paths
+PROJECT_ROOT = CONFIG_PATH.resolve().parent.parent
 
 BT_CFG = CONFIG["backtest"]
 TC_BPS = BT_CFG["transaction_cost_bps"]
 DRIFT_THRESHOLD = float(BT_CFG.get("rebalance_drift_threshold", 0.0) or 0.0)
+
+
+def _benchmark_tickers_from_config(available_columns: list) -> tuple[str | None, str | None]:
+    """
+    Resolve 60/40 benchmark tickers from config.
+    Returns (equity_ticker, bond_ticker) from assets.equities and assets.bonds
+    that exist in available_columns. Prefers ISF.L / IGLT.L when present.
+    """
+    assets_cfg = CONFIG.get("assets") or {}
+    equities = list((assets_cfg.get("equities") or {}).values())
+    bonds = list((assets_cfg.get("bonds") or {}).values())
+    avail = set(available_columns)
+    eq = next((t for t in equities if t in avail), None)
+    bd = next((t for t in bonds if t in avail), None)
+    return (eq, bd)
 
 
 def _get_cta_proxy_ticker_from_config() -> str | None:
@@ -358,19 +376,39 @@ class BacktestEngine:
 
     def run_benchmark(
         self,
-        equity_ticker: str = "ISF.L",
-        bond_ticker: str = "IGLT.L",
+        equity_ticker: str | None = None,
+        bond_ticker: str | None = None,
         equity_weight: float = 0.60,
+        index: pd.DatetimeIndex | None = None,
     ) -> pd.DataFrame:
         """
-        Run a static 60/40 benchmark for comparison.
+        Run a static 60/40-style benchmark for comparison.
+
+        The benchmark is defined as 60% equity / 40% bond using tickers from:
+        - hard-coded default: ISF.L / IGLT.L, or
+        - config assets.equities / assets.bonds as a fallback (first available pair).
+
+        If `index` is provided, the resulting benchmark series is reindexed to that
+        index (typically results.index from the backtest) with ffill/bfill so that
+        metrics and charts can compare like-for-like.
         """
-        if equity_ticker not in self.returns.columns:
-            logger.warning("Benchmark equity %s not in returns", equity_ticker)
-            return pd.DataFrame()
-        if bond_ticker not in self.returns.columns:
-            logger.warning("Benchmark bond %s not in returns", bond_ticker)
-            return pd.DataFrame()
+        # Resolve tickers: prefer explicit args, then defaults, then config-based fallback.
+        if equity_ticker is None:
+            equity_ticker = "ISF.L"
+        if bond_ticker is None:
+            bond_ticker = "IGLT.L"
+
+        if equity_ticker not in self.returns.columns or bond_ticker not in self.returns.columns:
+            eq, bd = _benchmark_tickers_from_config(list(self.returns.columns))
+            if eq is not None and bd is not None:
+                equity_ticker, bond_ticker = eq, bd
+                logger.info("Benchmark: using %s / %s (fallback from config assets)", equity_ticker, bond_ticker)
+            else:
+                if equity_ticker not in self.returns.columns:
+                    logger.warning("Benchmark equity %s not in returns; no fallback available", equity_ticker)
+                if bond_ticker not in self.returns.columns:
+                    logger.warning("Benchmark bond %s not in returns; no fallback available", bond_ticker)
+                return pd.DataFrame()
 
         bond_weight = 1 - equity_weight
         bm = (
@@ -378,11 +416,47 @@ class BacktestEngine:
             + self.returns[bond_ticker] * bond_weight
         )
         bm = bm.dropna()
+        if bm.empty:
+            logger.warning("Benchmark series for %s/%s is empty after dropna; no 60/40 benchmark available.", equity_ticker, bond_ticker)
+            return pd.DataFrame()
 
-        return pd.DataFrame({
+        bm_df = pd.DataFrame({
             "benchmark_return": bm,
             "benchmark_nav":    (1 + bm).cumprod(),
         })
+
+        # Optional alignment to a target index (e.g. results.index).
+        if index is not None and len(index) > 0:
+            tgt_idx = pd.DatetimeIndex(index)
+            if tgt_idx.tz is not None:
+                tgt_idx = tgt_idx.tz_localize(None)
+            src_idx = pd.DatetimeIndex(bm_df.index)
+            if src_idx.tz is not None:
+                src_idx = src_idx.tz_localize(None)
+            bm_df = bm_df.copy()
+            bm_df.index = src_idx
+            # Match by calendar day: results.index is often month-end 23:59:59, benchmark is 00:00:00.
+            tgt_dates = tgt_idx.normalize()
+            src_dates = src_idx.normalize()
+            bm_by_date = bm_df.set_index(src_dates)
+            aligned = bm_by_date.reindex(tgt_dates).ffill().bfill()
+            aligned.index = tgt_idx
+            if aligned["benchmark_nav"].notna().any():
+                logger.info(
+                    "Benchmark aligned to target index (%s -> %s, %d points).",
+                    src_idx.min().date() if len(src_idx) else None,
+                    tgt_idx.max().date() if len(tgt_idx) else None,
+                    len(aligned),
+                )
+                bm_df = aligned
+            else:
+                logger.warning(
+                    "Benchmark alignment to target index produced all-NaN NAV; dropping 60/40 series "
+                    "(no overlapping history on requested index)."
+                )
+                return pd.DataFrame()
+
+        return bm_df
 
 
 # ------------------------------------------------------------------
@@ -562,7 +636,14 @@ if __name__ == "__main__":
     engine  = BacktestEngine(rets, weights, regimes)
     results = engine.run()
     _verify_fire_cta_weight(results, weights)
-    bm      = engine.run_benchmark()
+    # Compute benchmark directly on the backtest index (results.index) so metrics and charts compare like-for-like.
+    bm      = engine.run_benchmark(index=results.index)
+    if bm.empty:
+        logger.warning(
+            "Benchmark is empty (no 60/40 series) even after alignment to results.index. Returns columns: %s",
+            list(rets.columns),
+        )
+        print("[Benchmark] Empty after run_benchmark(index=results.index). Returns columns:", list(rets.columns))
 
     rep_cfg = CONFIG.get("reporting") or {}
     if rep_cfg.get("real_wealth") and "cpi_index" in cpi.columns:
@@ -624,11 +705,12 @@ if __name__ == "__main__":
             summary = ", ".join(parts)
             print(f"  {regime_key:<8}: {total:4d} months — {summary}")
 
-    # Save interactive Plotly charts: cumulative returns with regime shading + weight heatmap
+    # Save interactive Plotly charts: three panels (NAV, drawdown, regime stacked area)
     try:
         from analysis.visualizer import save_backtest_charts
-        out_dir = Path(CONFIG.get("reporting", {}).get("output_dir", "reports"))
-        html_path = save_backtest_charts(results, weights, bm, out_dir / "backtest_charts.html")
+        out_dir_cfg = CONFIG.get("reporting", {}).get("output_dir", "reports")
+        out_dir = (PROJECT_ROOT / out_dir_cfg).resolve() if not Path(out_dir_cfg).is_absolute() else Path(out_dir_cfg)
+        html_path = save_backtest_charts(results, weights, bm, out_dir / "backtest_charts.html", classified_df=regimes)
         print("\nCharts saved: %s" % html_path)
     except Exception as e:
         logger.warning("Could not save backtest charts: %s", e)
