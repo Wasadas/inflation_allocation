@@ -24,6 +24,17 @@ For the Fire & Ice v2 pipeline using data from 2005–2026 and the current confi
 
 Outside the 2008–2009 crisis window, the portfolio delivers a Sharpe ratio of about 0.6–0.8 with a maximum drawdown around -13%. The worst month still occurs during the 2008 financial crisis, when a late‑cycle commodity supercycle peak collided with a systemic credit shock, but the current configuration keeps that loss in line with the rest of the distribution.
 
+### Performance by regime (2005–2026)
+
+| Regime  | Ann. return | Ann. vol | Sharpe | Max drawdown | Months |
+|--------|-------------|----------|--------|--------------|--------|
+| RECOVERY | 9.1%      | 5.0%     | 1.84   | -3.3%        | 69     |
+| ICE      | 3.3%      | 6.4%     | 0.52   | -13.5%       | 111    |
+| FIRE     | 1.7%      | 5.6%     | 0.30   | -8.4%        | 34     |
+| BOOM     | -1.1%     | 9.0%     | -0.12  | 0.0%         | 3      |
+
+BOOM only has three months in this sample, so it should be treated as a footnote rather than a stable pattern. The regime counts are also skewed: ICE alone covers 111 months (about half the history), so the headline portfolio Sharpe leans heavily on how the model behaves in ICE rather than on a perfectly even split across FIRE, ICE, BOOM, and RECOVERY.
+
 ### Data window and sources
 
 The canonical v2 backtest uses monthly data from January 2005 through March 2026 (effective start follows `backtest.start_date` in `fire_ice_model_2/config.yaml`, with an additional warm-up period for z-score calculations). Asset prices are pulled via `yfinance` for:
