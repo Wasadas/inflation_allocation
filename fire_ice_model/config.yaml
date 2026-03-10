@@ -50,7 +50,7 @@ assets:
     high_yield:      "IHYG.L"     # Credit spread exposure; sensitive to 'Reflation'.
   real_assets:
     commodities:     "CMOD.L"     # Broad basket: The primary winner in Neville's 100-year study.
-    gold:            "SGLN.L"     # Monetary hedge: Performs best in 'Stagflationary Fire'.
+    gold:            "IGLN.L"     # Monetary hedge: iShares Physical Gold (cleaner price history).
 #  trend:
 #    #   WTMA.L — WisdomTree Managed Futures (GBP, broad CTA replication)
 #    #   TIGF.L — SG Trend Index ETF (GBP-hedged)
@@ -121,7 +121,7 @@ risk_parity:
   reoptimise_frequency: "M"       # "M" monthly | "Q" quarterly
 
 # --- Trend Following ---
-trend_following:
+  trend_following:
   signal_type: "tsmom"            # "tsmom" | "ma_crossover"
   lookback_months: 12             # Neville's 12-month signal window
   cta_mode: "synthetic"           # "etf" = use assets.trend.cta_proxy | "synthetic" = build in-code from assets_to_trend
@@ -130,7 +130,7 @@ trend_following:
     - "IGLT.L"
     - "INXG.L"
     - "CMOD.L"
-    - "SGLN.L"
+    - "IGLN.L"
     - "IHYG.L"
   position_sizing: "vol_scaled"   # Scale by inverse volatility
   vol_target_per_signal: 0.02     # 2% vol target per individual trend position

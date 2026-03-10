@@ -275,12 +275,21 @@ class BacktestEngine:
             cost     = turnover * self.tc_bps / 10_000
             net      = gross - cost
 
+            # Normalise regime to canonical string so metrics never see "Regime.FIRE" or "Reg".
+            _r = regime.get(date, None)
+            if _r is None or (isinstance(_r, float) and np.isnan(_r)):
+                _r_label = None
+            elif hasattr(_r, "value"):
+                _r_label = _r.value
+            else:
+                _s = str(_r).strip()
+                _r_label = _s.split(".", 1)[1] if _s.startswith("Regime.") else (_s or None)
             results.append({
                 "date":               date,
                 "portfolio_return":   gross,
                 "net_return":         net,
                 "transaction_cost":   cost,
-                "regime":             regime.get(date, None),
+                "regime":             _r_label,
             })
             prev_wts = w
 

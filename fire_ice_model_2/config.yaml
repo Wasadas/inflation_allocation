@@ -1,0 +1,169 @@
+# Fire & Ice model — config
+# -------------------------
+# Parameters for the UK inflation‑regime backtest.
+# The idea is simple: use UK CPI to label the regime and then tilt
+# a small ETF portfolio accordingly. Everything here is meant to be
+# easy to tweak rather than perfectly calibrated.
+
+# --- Regime classification (the "Neville switch") ---
+
+# Logic: These parameters drive the state-machine that decides 
+# whether the model is in a 'Fire' or 'Ice' state.
+regime:
+  inflation_threshold: 5.0        # Based on Neville's key 5% YoY CPI threshold when stock-bond corr. flips from - to + 
+  # Z-Score Signal (Bauer 2015 improvement)
+  # "CPI > rolling_mean + z_threshold * rolling_std" instead of "CPI > 5%"
+  # Makes the model time-aware: 5% in 2021 was a 4-SD shock;
+  # 5% in 1975 was completely normal. Z-score captures this automatically.
+  signal_mode: "zscore"           # "threshold" (Neville original) | "zscore" (Bauer)
+  zscore_window: 120              # Rolling window in months (10 years of history)
+  zscore_threshold: 1.5           # SDs above rolling mean = "high inflation"
+                                  # 1.5 = top ~7% of obs. Range: 1.0 (sensitive) to 2.0 (conservative)
+# Regime Probability — smooth sigmoid transition
+  # Prevents churn when CPI bounces near the threshold (4.9% vs 5.1% problem)
+  # P(Fire) = 1 / (1 + exp(-k * (z_score - z_threshold)))
+  use_regime_probability: true    # false = hard binary switch | true = smooth sigmoid
+  sigmoid_steepness: 3.0          # k: higher = steeper curve, closer to hard switch
+                                  # 2.0 = very gradual | 3.0 = moderate | 5.0 = near-binary
+                                  # Tune this via backtest: minimise turnover, maximise Sharpe
+
+# Momentum & smoothing
+
+  # Momentum is used to distinguish between 'Fire' (Rising) and 'Boom' (Falling):
+  momentum_window: 12             # Months to measure CPI trend direction
+  # The 2nd derivative (Acceleration) helps the model "front-run" regime shifts
+  # before the full 12-month momentum confirms it.
+  acceleration_window: 3          # Months for 2nd derivative (velocity)
+  # 'ewm' (aka Exponentially Weighted Moving Average) is preferred over 'rolling'
+  # to give more weight to recent data, reducing the "lag" in regime detection.
+  smoothing: "ewm"                # "rolling" or "ewm" for trend smoothing
+  ewm_span: 6                     # Span for exponential smoothing
+
+# --- Asset Universe (all GBP, London-listed) ---
+assets:
+  equities:
+    uk_large_cap:    "ISF.L"      # FTSE 100: Heavy tilt toward Energy/Mining (Inflation Hedge).
+    uk_mid_cap:      "VMID.L"     # FTSE 250: More domestic UK exposure (Growth/Recession proxy).
+  bonds:
+    gilts:           "IGLT.L"     # Nominal Duration: Heavily punished in 'Fire'.
+    linkers:         "INXG.L"     # UK Index-Linked: Crucial for Neville's 'Fire' regime.
+    high_yield:      "IHYG.L"     # Credit spread exposure; sensitive to 'Reflation'.
+  real_assets:
+    commodities:     "CMOD.L"     # Broad commodity basket (v1 behaviour, lower energy concentration).
+    gold:            "IGLN.L"     # Monetary hedge: iShares Physical Gold (cleaner history than SGLN.L).
+#  trend:
+#    #   WTMA.L — WisdomTree Managed Futures (GBP, broad CTA replication)
+#    #   TIGF.L — SG Trend Index ETF (GBP-hedged)
+#    #   synthetic — built in-code from 12m MA on existing assets (best for backtest)
+  trend:
+    #   WTMA.L — WisdomTree Managed Futures (GBP, broad CTA replication)
+    #   TIGF.L — SG Trend Index ETF (GBP-hedged)
+    #   synthetic — built in-code from 12m MA on existing assets (best for backtest)
+    cta_proxy: "DBMF"             # iMGP DBi Managed Futures (USD); synthetic GBP-hedged proxy
+# Neville (2021) highlights CTAs because they are the only asset class that is regime-agnostic.
+# In "Ice" (Deflation): Bonds trend up. The CTA Proxy goes Long Bonds.
+# In "Fire" (Inflation): Commodities trend up; Bonds trend down. The CTA Proxy goes Long Commodities and Shorts Bonds.
+# CTA mode controls what the code actually uses at runtime
+# "etf"       = use cta_proxy ticker above (live/simple)
+# "synthetic" = build trend signal from existing asset list (research/backtest)
+
+# --- Regime-Conditional Weights ---
+# Neville-derived starting weights (overridden by risk_parity optimiser)
+# With use_regime_probability: true, these are blended continuously
+# rather than switched on/off. The blending formula in regime_weighting.py:
+#   w_t = P(fire)*w_fire + P(boom)*w_boom + P(ice)*w_ice + P(recovery)*w_recovery
+
+allocation:
+  fire:                           # High CPI + Rising: Commodities & Trend dominate
+    uk_large_cap:    0.05
+    uk_mid_cap:      0.05
+    gilts:           0.05
+    linkers:         0.05
+    high_yield:      0.05
+    commodities:     0.35
+    gold:            0.15
+    cta_proxy:       0.25
+  disinflationary_boom:           # High CPI + Falling: Equities recover
+    uk_large_cap:    0.20
+    uk_mid_cap:      0.15
+    gilts:           0.10
+    linkers:         0.15
+    high_yield:      0.15
+    commodities:     0.10
+    gold:            0.05
+    cta_proxy:       0.10
+  ice:                            # Low CPI + Falling: Duration is king
+    uk_large_cap:    0.20
+    uk_mid_cap:      0.10
+    gilts:           0.40
+    linkers:         0.10
+    high_yield:      0.05
+    commodities:     0.05
+    gold:            0.05
+    cta_proxy:       0.05
+  reflationary_recovery:          # Low CPI + Rising: Cyclicals & Credit
+    uk_large_cap:    0.15
+    uk_mid_cap:      0.20
+    gilts:           0.10
+    linkers:         0.20
+    high_yield:      0.15
+    commodities:     0.10
+    gold:            0.05
+    cta_proxy:       0.05
+
+# --- Risk Parity ---
+risk_parity:
+  enabled: true
+  target_vol: 0.10                # 10% annualised portfolio volatility target
+  lookback_vol_days: 60           # Covariance estimation window
+  min_weight: 0.02                # Floor: no asset below 2%
+  max_weight: 0.45                # Cap: no asset above 45%
+  reoptimise_frequency: "M"       # "M" monthly | "Q" quarterly
+  blend_alpha: 0.5                # 0 = pure regime weights, 1 = pure risk parity
+
+# --- Trend Following ---
+trend_following:
+  signal_type: "tsmom"            # "tsmom" | "ma_crossover"
+  lookback_months: 12             # Neville's 12-month signal window
+  cta_mode: "synthetic"           # "etf" = use assets.trend.cta_proxy | "synthetic" = build in-code from assets_to_trend
+  assets_to_trend:                # Apply momentum signal across all classes
+    - "ISF.L"
+    - "IGLT.L"
+    - "INXG.L"
+    - "CMOD.L"
+    - "IGLN.L"
+    - "IHYG.L"
+  position_sizing: "vol_scaled"   # Scale by inverse volatility
+  vol_target_per_signal: 0.02     # 2% vol target per individual trend position
+  allow_shorts: false             # Long/flat CTA (no net short positions)
+
+# --- Backtest ---
+backtest:
+  start_date: "2005-01-01"        # GSG available from 2006, DBMF from 2017; DBMF is the binding constraint for CTA
+  end_date: null                  # null = today
+  rebalance_frequency: "M"        # Monthly
+  transaction_cost_bps: 10        # 10bps per leg (realistic for ETFs)
+  benchmark: "6040"               # 60% ISF.L / 40% IGLT.L
+  base_currency: "GBP"
+  rebalance_drift_threshold: 0.03 # Only trade when per-asset weight change exceeds this (3%)
+  target_vol: 0.075               # Portfolio-level volatility target (annualised)
+  vol_scale_max: 1.40             # Maximum leverage factor applied in vol targeting
+# --- Data Sources ---
+data:
+  cache_dir: ".cache/parquet"
+  fred_series:
+    uk_cpi:         "GBRCPIALLMINMEI"   # UK CPI All Items MoM
+    uk_pmi:         "GBRPMI"            # S&P Global UK Composite PMI
+    uk_base_rate:   "BOERUKM"           # BoE Base Rate
+    uk_rpi:         "GBRCP0000EIQ"      # RPI as supplement
+  boe_api_base: "https://www.bankofengland.co.uk/boeapps/database"
+
+  # ONS source used by the CPI handler (CSV generator). The old ONS beta API endpoint is not used.
+  ons_csv_generator_base: "https://www.ons.gov.uk/generator"
+  ons_cpi_uri: "/economy/inflationandpriceindices/timeseries/d7bt/mm23"   # CPI INDEX 00: ALL ITEMS 2015=100
+
+# --- Reporting ---
+reporting:
+  output_dir: "reports/"
+  dashboard_port: 8050
+  refresh_hours: 24

@@ -211,6 +211,25 @@ class RegimeClassifier:
                 lag,
             )
 
+        # ---- 6. Normalise regime columns to plain string labels ----
+        # Avoid Enum/repr artefacts (e.g. "Regime.FIRE" or truncated "Reg") downstream.
+        def _to_label(x):
+            if x is None or (isinstance(x, float) and np.isnan(x)):
+                return None
+            if isinstance(x, Regime):
+                return x.value
+            s = str(x).strip()
+            if s.startswith("Regime."):
+                return s.split(".", 1)[1]
+            return s if s else None
+
+        if "raw_regime" in df.columns:
+            df["raw_regime"] = df["raw_regime"].map(_to_label)
+        if "regime" in df.columns:
+            df["regime"] = df["regime"].map(_to_label)
+        if self.use_probabilities and "dominant_regime" in df.columns:
+            df["dominant_regime"] = df["dominant_regime"].map(_to_label)
+
         return df
 
     # ------------------------------------------------------------------
