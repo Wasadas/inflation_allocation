@@ -15,6 +15,8 @@ Fire & Ice is a UK-focused tactical allocation model that reacts to inflation re
 
 Charts are written to `reports/backtest_charts.html` after running the backtest.
 
+![Fire & Ice vs 60/40 backtest](images/backtest_chart.png)
+
 ### Canonical v2 metrics
 
 For the Fire & Ice v2 pipeline using data from 2005–2026 and the current configuration (217 months):
