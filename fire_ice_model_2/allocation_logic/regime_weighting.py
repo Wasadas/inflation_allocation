@@ -25,9 +25,8 @@ import yaml
 logger = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------
-# Config loading
+# Config loading (v2)
 # ------------------------------------------------------------------
-# Reads package config from fire_ice_model/config.yaml
 CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
 
 with open(CONFIG_PATH, "r") as f:
