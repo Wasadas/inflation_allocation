@@ -44,7 +44,7 @@ Rather than searching for the “best” parameter set, the model fixes a small 
 
 In this simple implementation the Fire and Ice portfolio ends up trading less and hugging cash and bonds more than a classic 60/40, so it gives up some return and Sharpe in exchange for lower volatility. If I had more time I would tune the regime definitions and trend signals, and experiment with extra assets or risk controls, to see whether the idea survives in a richer but still realistic setup.
 
-The worst historical drawdown (around -27%) is concentrated in a single episode during the 2008 financial crisis, when a late‑cycle commodity supercycle peak collided with a systemic credit shock. The model’s monthly regime switch uses only level × direction of CPI and has no way to distinguish “inflationary commodity exposure” from “crisis‑driven commodity collapse” at that horizon, so it remains fully allocated to the FIRE commodity sleeve as the shock unfolds. This should be read as an honest limitation of a simple monthly macro regime model, not a failure of the implementation.
+The current configuration’s worst historical drawdown (about -13%) still occurs around the 2008 financial crisis, when a late‑cycle commodity supercycle peak collided with a systemic credit shock. The model’s monthly regime switch uses only level × direction of CPI and has no way to distinguish “inflationary commodity exposure” from “crisis‑driven commodity collapse” at that horizon, so it remains fully allocated to the FIRE commodity sleeve as the shock unfolds. This should be read as an honest limitation of a simple monthly macro regime model, not a failure of the implementation.
 
 At a higher level the model makes three big simplifying assumptions:
 
